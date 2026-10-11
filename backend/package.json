@@ -1,0 +1,17 @@
+{
+  "name": "rssi-rescue-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "bridge": "node serial-bridge.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "serialport": "^12.0.0",
+    "socket.io": "^4.7.5",
+    "uuid": "^10.0.0"
+  }
+}
