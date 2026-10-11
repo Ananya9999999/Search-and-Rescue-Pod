@@ -1,27 +1,36 @@
-# RSSI Rescue Pod — Full Stack Dashboard
+# RSSI Rescue Pod — Command Dashboard
 
-Live search-and-rescue dashboard that receives real-time verdicts from the ESP8266 pod.
+## What's new
 
-## Features
+- **Admin can assign response teams** to any HIGH detection
+- **Admin can correct location** by clicking on the map
+- Clear explanation of location source (`approximate` vs `gps` vs `admin`)
+- Much improved UI: stats bar, filters, detail panel, assignment workflow
+- Live WebSocket updates from the ESP8266 via USB serial bridge
 
-- **Live hardware feed** via WebSocket (ESP8266 pushes JSON)
-- **Team** and **Admin** login profiles
-- Ranked detection list (HIGH / LOW / VETO)
-- Leaflet site map
-- Session log with export
-- Simulation mode (works without hardware)
+## Why location looked wrong
 
-## Quick Start
+The ESP8266 has **no GPS**.  
+When a detection arrives without coordinates, the backend places it near a default site origin (Delhi coordinates) with a small random offset and marks it as `approximate`.
 
-### 1. Backend
+**Admin workflow:**
+1. Select a HIGH detection
+2. Click **Pick on map**
+3. Click the real place on the map
+4. Location source becomes `admin`
+
+Later you can add a GPS module or send the rescuer's phone location.
+
+## Run
+
+### Terminal 1 — Backend
 ```bash
 cd backend
 npm install
 npm start
 ```
-Server runs on http://localhost:4000
 
-### 2. Frontend
+### Terminal 2 — Frontend
 ```bash
 cd frontend
 npm install
@@ -29,42 +38,21 @@ npm run dev
 ```
 Open http://localhost:5173
 
-### Default Logins
-| Role  | Username | Password |
-|-------|----------|----------|
-| Admin | admin    | admin123 |
-| Team  | team1    | team123  |
-| Team  | team2    | team123  |
-
-## Hardware Connection
-
-The ESP8266 firmware already prints one JSON line per cycle on Serial, for example:
-
-```json
-{"temp_c":34.2,"rssi":-62,"heat":true,"phone":true,"object":false,"gas":false,"verdict":"HIGH"}
-```
-
-### Option A — Serial Bridge (recommended for demo)
+### Terminal 3 — Hardware (USB)
 ```bash
 cd backend
-node serial-bridge.js
+node serial-bridge.js COM3
 ```
-This reads the NodeMCU Serial port and forwards every JSON line to the backend over WebSocket.
+(Close Arduino Serial Monitor first. Use your real COM port.)
 
-### Option B — Wi-Fi push from ESP (advanced)
-Point the ESP8266 at the backend HTTP endpoint:
-`POST http://<laptop-ip>:4000/api/ingest`
+## Logins
 
-## Project Structure
-```
-sar_final/
-├── backend/          # Express + Socket.io + auth
-├── frontend/         # React + Leaflet dashboard
-├── firmware/         # Notes + serial bridge helper
-└── README.md
-```
+| Role  | Username | Password  |
+|-------|----------|-----------|
+| Admin | admin    | admin123  |
+| Team  | team1    | team123   |
+| Team  | team2    | team123   |
+| Team  | team3    | team123   |
 
-## Roles
-
-- **Team**: view live map, detections, logs of their own session
-- **Admin**: view all teams, manage sessions, export full logs
+- **Admin**: see all detections, assign teams, set locations, clear log
+- **Team**: see detections reported by them or assigned to them
