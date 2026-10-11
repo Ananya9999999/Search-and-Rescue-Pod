@@ -4,7 +4,7 @@
 
 - **Redesigned frontend**: light operations theme, floating panels over a full-bleed map, split into components under `frontend/src/components`. Works on phones.
 - **Optimised team routing** (see below)
-- Fonts and map styles are bundled locally, so the UI doesn't depend on Google Fonts or unpkg being reachable in the field. Map *tiles* still need internet.
+- Fonts and Leaflet styles are bundled locally (installed by `npm install`), so the UI doesn't depend on Google Fonts or unpkg. Map *tiles* (OpenStreetMap) still need internet.
 
 ## How routing works
 
@@ -50,7 +50,7 @@ npm start
 ### Terminal 2 — Frontend
 ```bash
 cd frontend
-npm install
+npm install   # required again: new font packages were added
 npm run dev
 ```
 Open http://localhost:5173
