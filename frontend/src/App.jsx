@@ -1,144 +1,87 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { io } from "socket.io-client";
-import { MapContainer, TileLayer, CircleMarker, Popup, useMapEvents, useMap } from "react-leaflet";
-
-const API = "http://localhost:4000";
-
-const TIER_COLOR = {
-  HIGH: "#22c55e",
-  LOW: "#eab308",
-  VETO: "#ef4444",
-  NONE: "#64748b",
-};
-
-function FitBounds({ points }) {
-  const map = useMap();
-  useEffect(() => {
-    if (!points.length) return;
-    const b = points.map((p) => [p.lat, p.lng]);
-    if (b.length === 1) map.setView(b[0], 17);
-    else map.fitBounds(b, { padding: [50, 50], maxZoom: 18 });
-  }, [points, map]);
-  return null;
-}
-
-function MapClickHandler({ enabled, onPick }) {
-  useMapEvents({
-    click(e) {
-      if (enabled) onPick(e.latlng.lat, e.latlng.lng);
-    },
-  });
-  return null;
-}
-
-function Login({ onLogin }) {
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin123");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  async function submit(e) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      const res = await fetch(`${API}/api/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Login failed");
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
-      onLogin(data.user, data.token);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="login-page">
-      <form className="login-card" onSubmit={submit}>
-        <div className="logo">RSSI</div>
-        <h1>Rescue Pod Command</h1>
-        <p>Live search &amp; rescue coordination</p>
-        {error && <div className="login-error">{error}</div>}
-        <label>Username</label>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
-        <label>Password</label>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        <button type="submit" disabled={loading}>
-          {loading ? "Signing in…" : "Sign in"}
-        </button>
-        <div className="login-hint">
-          <strong>Admin</strong> admin / admin123<br />
-          <strong>Team</strong> team1 / team123 · team2 / team123 · team3 / team123
-        </div>
-      </form>
-    </div>
-  );
-}
+import Login from "./components/Login";
+import MapView from "./components/MapView";
+import DetectionList, { TeamsList } from "./components/DetectionList";
+import DetailPanel from "./components/DetailPanel";
+import ChatPanel from "./components/ChatPanel";
+import { API, TEAM_COLOR, initials, fmtTime } from "./lib/format";
 
 function Dashboard({ user, token, onLogout }) {
   const [detections, setDetections] = useState([]);
-  const [live, setLive] = useState({ connected: false, lastSeen: null, lastVerdict: null });
-  const [site, setSite] = useState({ lat: 28.6139, lng: 77.209, name: "Rescue Site" });
-  const [teams, setTeams] = useState(["Alpha", "Bravo", "Charlie", "Delta"]);
+  const [live, setLive] = useState({ connected: false });
+  const [site, setSite] = useState({ lat: 28.6139, lng: 77.209, name: "Collapse site" });
+  const [teams, setTeams] = useState([]);
+  const [positions, setPositions] = useState({});
+  const [messages, setMessages] = useState([]);
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState("ALL");
   const [pickMode, setPickMode] = useState(false);
-  const [assignTeam, setAssignTeam] = useState("");
   const [notes, setNotes] = useState("");
+  const [leftTab, setLeftTab] = useState("detections");
+  const [rightTab, setRightTab] = useState("detail");
+  const [fitSignal, setFitSignal] = useState(0);
+  const [toasts, setToasts] = useState([]);
+  const statusRef = useRef({});
 
   const headers = useMemo(
     () => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" }),
     [token]
   );
 
+  const pushToast = useCallback((text) => {
+    const id = crypto.randomUUID();
+    setToasts((t) => [...t.slice(-2), { id, text }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5000);
+  }, []);
+
   useEffect(() => {
     const socket = io(API, { transports: ["websocket", "polling"] });
+    const mine = (d) => user.role === "admin" || d.team === user.team || d.assignedTeam === user.team;
 
     socket.on("status", setLive);
     socket.on("site:updated", setSite);
+    socket.on("teams:positions", (p) => setPositions({ ...p }));
+    socket.on("message", (m) => setMessages((prev) => [...prev, m].slice(-100)));
+    socket.on("messages:init", (list) => setMessages(list || []));
     socket.on("detection", (d) => {
-      setDetections((prev) => {
-        if (user.role !== "admin" && d.team !== user.team && d.assignedTeam !== user.team)
-          return prev;
-        return [d, ...prev.filter((x) => x.id !== d.id)].slice(0, 200);
-      });
+      if (!mine(d)) return;
+      setDetections((prev) => [d, ...prev.filter((x) => x.id !== d.id)].slice(0, 200));
     });
     socket.on("detection:updated", (d) => {
-      setDetections((prev) => prev.map((x) => (x.id === d.id ? d : x)));
+      if (statusRef.current[d.id] && statusRef.current[d.id] !== "reached" && d.status === "reached") {
+        pushToast(`${d.assignedTeam} reached the detection at ${fmtTime(d.reachedAt || new Date().toISOString())}`);
+      }
+      statusRef.current[d.id] = d.status;
+      setDetections((prev) => {
+        const exists = prev.some((x) => x.id === d.id);
+        if (exists) return prev.map((x) => (x.id === d.id ? d : x));
+        return mine(d) ? [d, ...prev] : prev;
+      });
       setSelected((s) => (s && s.id === d.id ? d : s));
     });
-    socket.on("detections:init", (list) => {
-      const filtered =
-        user.role === "admin"
-          ? list
-          : list.filter((d) => d.team === user.team || d.assignedTeam === user.team);
-      setDetections(filtered);
-    });
+    socket.on("detections:init", (list) => setDetections(list.filter(mine)));
     socket.on("detections:cleared", () => {
       setDetections([]);
       setSelected(null);
     });
 
-    fetch(`${API}/api/detections`, { headers })
-      .then((r) => r.json())
-      .then((d) => setDetections(d.detections || []))
-      .catch(() => {});
-    fetch(`${API}/api/teams`, { headers })
-      .then((r) => r.json())
-      .then((d) => setTeams(d.teams || []));
-    fetch(`${API}/api/site`, { headers })
-      .then((r) => r.json())
-      .then((d) => setSite(d.site));
+    const get = (path) => fetch(`${API}${path}`, { headers }).then((r) => r.json());
+    get("/api/detections").then((d) => {
+      const list = d.detections || [];
+      list.forEach((x) => (statusRef.current[x.id] = x.status));
+      setDetections(list);
+    });
+    get("/api/teams").then((d) => { setTeams(d.teams || []); setPositions(d.positions || {}); });
+    get("/api/site").then((d) => d.site && setSite(d.site));
+    get("/api/messages").then((d) => setMessages(d.messages || []));
 
     return () => socket.disconnect();
-  }, [user, token, headers]);
+  }, [user, token, headers, pushToast]);
+
+  // Reset the notes box only when a different detection is opened.
+  // (Depending on the whole object would wipe typing on every live update.)
+  useEffect(() => { setNotes(selected?.notes || ""); setPickMode(false); }, [selected?.id]);
 
   const filtered = useMemo(() => {
     if (filter === "ALL") return detections;
@@ -146,236 +89,162 @@ function Dashboard({ user, token, onLogout }) {
     return detections.filter((d) => d.verdict === filter);
   }, [detections, filter]);
 
-  const stats = useMemo(() => {
-    const high = detections.filter((d) => d.verdict === "HIGH").length;
-    const low = detections.filter((d) => d.verdict === "LOW").length;
-    const veto = detections.filter((d) => d.verdict === "VETO").length;
-    const assigned = detections.filter((d) => d.assignedTeam).length;
-    return { high, low, veto, assigned, total: detections.length };
-  }, [detections]);
+  const stats = useMemo(() => ({
+    high: detections.filter((d) => d.verdict === "HIGH").length,
+    needsTeam: detections.filter((d) => d.verdict === "HIGH" && !d.assignedTeam).length,
+    enRoute: detections.filter((d) => d.status === "en_route" || d.status === "queued").length,
+    reached: detections.filter((d) => d.status === "reached").length,
+  }), [detections]);
 
-  async function assign() {
-    if (!selected || user.role !== "admin") return;
-    const res = await fetch(`${API}/api/detections/${selected.id}/assign`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify({ team: assignTeam || null, notes }),
-    });
-    const data = await res.json();
-    if (res.ok) setSelected(data.detection);
+  // Only the part of the route still ahead of the team is drawn
+  const routes = useMemo(() => {
+    const out = [];
+    for (const d of detections) {
+      if (d.verdict !== "HIGH" || !d.assignedTeam || d.status === "reached") continue;
+      if (!d.route || d.route.length < 2) continue;
+      const queued = d.status === "queued";
+      const pos = positions[d.assignedTeam];
+      const pts = queued || !pos ? d.route : [[pos.lat, pos.lng], ...d.route.slice(d.routeIdx || 0)];
+      if (pts.length < 2) continue;
+      out.push({
+        id: d.id,
+        team: d.assignedTeam,
+        color: TEAM_COLOR[d.assignedTeam] || "#64748b",
+        positions: pts,
+        queued,
+        eta: d.etaSeconds,
+        remaining: d.remainingMeters ?? d.distanceMeters,
+      });
+    }
+    return out;
+  }, [detections, positions]);
+
+  const fitPoints = useMemo(() => {
+    const pts = detections.filter((d) => d.lat && d.lng).map((d) => ({ lat: d.lat, lng: d.lng }));
+    Object.values(positions).forEach((p) => pts.push(p));
+    return pts;
+  }, [detections, positions]);
+
+  function open(d) {
+    setSelected(d);
+    setRightTab("detail");
+  }
+
+  function handleUpdated(d) {
+    setSelected(d);
+    setDetections((prev) => prev.map((x) => (x.id === d.id ? d : x)));
   }
 
   async function setLocation(lat, lng) {
     if (!selected || user.role !== "admin") return;
     const res = await fetch(`${API}/api/detections/${selected.id}/location`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify({ lat, lng }),
+      method: "PATCH", headers, body: JSON.stringify({ lat, lng }),
     });
     const data = await res.json();
-    if (res.ok) {
-      setSelected(data.detection);
-      setPickMode(false);
-    }
+    if (res.ok) { handleUpdated(data.detection); setPickMode(false); }
+  }
+
+  async function sendMessage(text, toTeam) {
+    await fetch(`${API}/api/messages`, { method: "POST", headers, body: JSON.stringify({ text, toTeam }) });
   }
 
   async function clearAll() {
     if (user.role !== "admin") return;
-    if (!confirm("Clear all detections?")) return;
+    if (!confirm("Clear every detection from the log? This can't be undone.")) return;
     await fetch(`${API}/api/detections/clear`, { method: "POST", headers });
   }
 
-  useEffect(() => {
-    if (selected) {
-      setAssignTeam(selected.assignedTeam || "");
-      setNotes(selected.notes || "");
-    }
-  }, [selected]);
-
   return (
-    <div className="dashboard">
+    <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="logo-sm">RSSI</span>
+          <span className="mark">R</span>
           <div>
-            <h1>Rescue Pod Command</h1>
-            <span className="sub">{site.name}</span>
+            <h1>Rescue Pod</h1>
+            <span className="muted">{site.name}</span>
           </div>
         </div>
 
-        <div className="stats-bar">
-          <div className="stat"><span className="n">{stats.high}</span><span className="l">HIGH</span></div>
-          <div className="stat"><span className="n">{stats.low}</span><span className="l">LOW</span></div>
-          <div className="stat"><span className="n">{stats.veto}</span><span className="l">VETO</span></div>
-          <div className="stat"><span className="n">{stats.assigned}</span><span className="l">Assigned</span></div>
-        </div>
+        <dl className="stats">
+          <div><dd>{stats.high}</dd><dt>High signals</dt></div>
+          <div className={stats.needsTeam ? "alert" : ""}><dd>{stats.needsTeam}</dd><dt>Need a team</dt></div>
+          <div><dd>{stats.enRoute}</dd><dt>On the way</dt></div>
+          <div><dd>{stats.reached}</dd><dt>Reached</dt></div>
+        </dl>
 
-        <div className="meta">
-          <span className={`badge ${live.connected ? "live" : "offline"}`}>
-            {live.connected ? "● LIVE" : "○ Offline"}
+        <div className="top-right">
+          <span className={`live ${live.connected ? "on" : ""}`}>
+            <i />
+            {live.connected ? "Pod live" : "Pod offline"}
+            {live.lastSeen && <small>{fmtTime(live.lastSeen)}</small>}
           </span>
-          <span className="badge role">{user.role.toUpperCase()} · {user.team}</span>
-          {user.role === "admin" && (
-            <button className="btn-ghost" onClick={clearAll}>Clear</button>
-          )}
-          <button className="btn-ghost" onClick={onLogout}>Logout</button>
+          {user.role === "admin" && <button className="btn ghost" onClick={clearAll}>Clear log</button>}
+          <div className="user">
+            <span className="avatar sm" style={{ "--team": TEAM_COLOR[user.team] || "#64748b" }}>{initials(user.name || user.username)}</span>
+            <span className="user-text"><b>{user.name || user.username}</b><small>{user.role === "admin" ? "Command" : `${user.team} team`}</small></span>
+          </div>
+          <button className="btn ghost" onClick={onLogout}>Sign out</button>
         </div>
       </header>
 
-      <div className="main">
-        <aside className="panel left">
-          <div className="panel-head">
-            <h2>Detections</h2>
-            <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-              <option value="ALL">All</option>
-              <option value="HIGH">HIGH only</option>
-              <option value="LOW">LOW only</option>
-              <option value="VETO">VETO only</option>
-              <option value="UNASSIGNED">Unassigned HIGH</option>
-            </select>
+      <main className="stage">
+        <MapView
+          site={site}
+          detections={filtered}
+          positions={positions}
+          teams={teams}
+          routes={routes}
+          selected={selected}
+          onSelect={open}
+          pickMode={pickMode}
+          onPick={setLocation}
+          onCancelPick={() => setPickMode(false)}
+          fitPoints={fitPoints}
+          fitSignal={fitSignal}
+          onFit={() => setFitSignal((n) => n + 1)}
+        />
+
+        <aside className="panel left" aria-label="Detections and teams">
+          <div className="tabs">
+            <button className={leftTab === "detections" ? "on" : ""} onClick={() => setLeftTab("detections")}>
+              Detections <span className="count">{detections.length}</span>
+            </button>
+            <button className={leftTab === "teams" ? "on" : ""} onClick={() => setLeftTab("teams")}>Teams</button>
           </div>
-
-          <div className="list">
-            {filtered.length === 0 && <div className="empty">No detections yet</div>}
-            {filtered.map((d) => (
-              <div
-                key={d.id}
-                className={`det-card ${d.verdict} ${selected?.id === d.id ? "active" : ""}`}
-                onClick={() => setSelected(d)}
-              >
-                <div className="row">
-                  <span className="tier">{d.verdict}</span>
-                  <span className="time">{new Date(d.timestamp).toLocaleTimeString()}</span>
-                </div>
-                <div className="metrics">
-                  {d.temp_c != null && <span>{Number(d.temp_c).toFixed(1)}°C</span>}
-                  {d.rssi != null && <span>{d.rssi} dBm</span>}
-                  {d.heat && <span className="tag">Heat</span>}
-                  {d.phone && <span className="tag">Phone</span>}
-                  {d.gas && <span className="tag danger">Gas</span>}
-                </div>
-                <div className="assign-line">
-                  {d.assignedTeam ? (
-                    <span className="assigned">→ {d.assignedTeam}</span>
-                  ) : d.verdict === "HIGH" ? (
-                    <span className="unassigned">Unassigned</span>
-                  ) : null}
-                  <span className="loc-src">{d.locationSource}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </aside>
-
-        <div className="map-wrap">
-          {pickMode && (
-            <div className="pick-banner">
-              Click on the map to set location for the selected detection
-              <button onClick={() => setPickMode(false)}>Cancel</button>
-            </div>
-          )}
-          <MapContainer center={[site.lat, site.lng]} zoom={16} style={{ height: "100%", width: "100%" }}>
-            <TileLayer
-              attribution='&copy; OpenStreetMap'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            <FitBounds points={filtered.filter((d) => d.lat && d.lng)} />
-            <MapClickHandler enabled={pickMode} onPick={setLocation} />
-            {filtered.map((d) => {
-              if (!d.lat || !d.lng) return null;
-              const color = TIER_COLOR[d.verdict] || "#64748b";
-              return (
-                <CircleMarker
-                  key={d.id}
-                  center={[d.lat, d.lng]}
-                  radius={selected?.id === d.id ? 14 : 10}
-                  pathOptions={{
-                    color,
-                    fillColor: color,
-                    fillOpacity: d.assignedTeam ? 0.9 : 0.55,
-                    weight: selected?.id === d.id ? 3 : 2,
-                  }}
-                  eventHandlers={{ click: () => setSelected(d) }}
-                >
-                  <Popup>
-                    <strong>{d.verdict}</strong>
-                    {d.assignedTeam && <> · Team {d.assignedTeam}</>}
-                    <br />
-                    {d.temp_c != null && `${Number(d.temp_c).toFixed(1)}°C · `}
-                    RSSI {d.rssi}
-                    <br />
-                    {new Date(d.timestamp).toLocaleString()}
-                  </Popup>
-                </CircleMarker>
-              );
-            })}
-          </MapContainer>
-        </div>
-
-        <aside className="panel right">
-          <h2>Detail</h2>
-          {!selected ? (
-            <div className="empty">Select a detection</div>
+          {leftTab === "detections" ? (
+            <DetectionList detections={filtered} filter={filter} setFilter={setFilter} selectedId={selected?.id} onSelect={open} />
           ) : (
-            <div className="detail">
-              <div className={`detail-tier ${selected.verdict}`}>{selected.verdict}</div>
-              <div className="detail-grid">
-                <div><label>Temperature</label><span>{selected.temp_c != null ? `${Number(selected.temp_c).toFixed(1)} °C` : "—"}</span></div>
-                <div><label>RSSI</label><span>{selected.rssi != null ? `${selected.rssi} dBm` : "—"}</span></div>
-                <div><label>Heat</label><span>{selected.heat ? "Yes" : "No"}</span></div>
-                <div><label>Phone</label><span>{selected.phone ? "Yes" : "No"}</span></div>
-                <div><label>Gas</label><span>{selected.gas ? "Yes" : "No"}</span></div>
-                <div><label>Object</label><span>{selected.object ? "Yes" : "No"}</span></div>
-                <div><label>Reported by</label><span>{selected.team}</span></div>
-                <div><label>Location</label><span>{selected.locationSource}</span></div>
-                <div className="full"><label>Time</label><span>{new Date(selected.timestamp).toLocaleString()}</span></div>
-                <div className="full"><label>Coords</label><span>{selected.lat?.toFixed(5)}, {selected.lng?.toFixed(5)}</span></div>
-              </div>
-
-              {user.role === "admin" && (
-                <div className="admin-actions">
-                  <h3>Assign Response Team</h3>
-                  <select value={assignTeam} onChange={(e) => setAssignTeam(e.target.value)}>
-                    <option value="">— Unassigned —</option>
-                    {teams.map((t) => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
-                  <textarea
-                    placeholder="Notes for the team…"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={2}
-                  />
-                  <button className="btn-primary" onClick={assign}>
-                    {assignTeam ? `Assign to ${assignTeam}` : "Clear assignment"}
-                  </button>
-
-                  <h3>Correct Location</h3>
-                  <p className="hint">
-                    Current location is <strong>{selected.locationSource}</strong>.
-                    Click “Pick on map” then click the correct place on the map.
-                  </p>
-                  <button
-                    className={`btn-secondary ${pickMode ? "active" : ""}`}
-                    onClick={() => setPickMode((v) => !v)}
-                  >
-                    {pickMode ? "Cancel pick" : "Pick on map"}
-                  </button>
-                </div>
-              )}
-
-              {selected.assignedTeam && (
-                <div className="assigned-box">
-                  Assigned to <strong>{selected.assignedTeam}</strong>
-                  {selected.assignedBy && <> by {selected.assignedBy}</>}
-                  {selected.notes && <p>{selected.notes}</p>}
-                </div>
-              )}
-            </div>
+            <TeamsList teams={teams} detections={detections} />
           )}
         </aside>
-      </div>
+
+        <aside className="panel right" aria-label="Details and chat">
+          <div className="tabs">
+            <button className={rightTab === "detail" ? "on" : ""} onClick={() => setRightTab("detail")}>Details</button>
+            <button className={rightTab === "chat" ? "on" : ""} onClick={() => setRightTab("chat")}>Team chat</button>
+          </div>
+          {rightTab === "chat" ? (
+            <ChatPanel user={user} messages={messages} onSend={sendMessage} />
+          ) : (
+            <DetailPanel
+              selected={selected}
+              user={user}
+              headers={headers}
+              teams={teams}
+              notes={notes}
+              setNotes={setNotes}
+              pickMode={pickMode}
+              setPickMode={setPickMode}
+              onUpdated={handleUpdated}
+              onClose={() => setSelected(null)}
+            />
+          )}
+        </aside>
+
+        <div className="toasts" aria-live="polite">
+          {toasts.map((t) => <div key={t.id} className="toast">{t.text}</div>)}
+        </div>
+      </main>
     </div>
   );
 }
@@ -387,14 +256,7 @@ export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem("token"));
 
   if (!user || !token) {
-    return (
-      <Login
-        onLogin={(u, t) => {
-          setUser(u);
-          setToken(t);
-        }}
-      />
-    );
+    return <Login onLogin={(u, t) => { setUser(u); setToken(t); }} />;
   }
 
   return (
