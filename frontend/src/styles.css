@@ -1,0 +1,155 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-panel: var(--panel);
+  --color-grid: var(--grid);
+  --font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+:root {
+  --radius: 0.35rem;
+  --background: oklch(0.17 0.018 248);
+  --foreground: oklch(0.94 0.008 240);
+  --card: oklch(0.213 0.019 248);
+  --card-foreground: oklch(0.94 0.008 240);
+  --panel: oklch(0.235 0.02 248);
+  --popover: oklch(0.213 0.019 248);
+  --popover-foreground: oklch(0.94 0.008 240);
+  --primary: oklch(0.8 0.13 205);
+  --primary-foreground: oklch(0.18 0.03 240);
+  --secondary: oklch(0.28 0.02 248);
+  --secondary-foreground: oklch(0.93 0.01 240);
+  --muted: oklch(0.26 0.018 248);
+  --muted-foreground: oklch(0.68 0.02 240);
+  --accent: oklch(0.79 0.15 78);
+  --accent-foreground: oklch(0.18 0.03 240);
+  --destructive: oklch(0.63 0.2 22);
+  --destructive-foreground: oklch(0.97 0.01 240);
+  --border: oklch(0.31 0.021 248);
+  --input: oklch(0.31 0.021 248);
+  --ring: oklch(0.8 0.13 205);
+  --grid: oklch(0.26 0.02 248);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    background-image:
+      linear-gradient(var(--color-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--color-grid) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+}
+
+@utility panel-surface {
+  background-color: color-mix(in oklab, var(--color-panel) 92%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(6px);
+}
+
+@utility label-xs {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+
+/* Leaflet */
+.leaflet-container {
+  background: oklch(0.2 0.02 248);
+  font-family: var(--font-mono);
+}
+.site-tiles {
+  filter: invert(1) hue-rotate(185deg) brightness(0.92) contrast(0.88) saturate(0.6);
+}
+.leaflet-control-attribution {
+  background: color-mix(in oklab, var(--color-background) 80%, transparent) !important;
+  color: var(--color-muted-foreground) !important;
+  font-size: 9px;
+}
+.leaflet-control-attribution a {
+  color: var(--color-muted-foreground) !important;
+}
+.leaflet-bar a {
+  background: var(--color-panel) !important;
+  color: var(--color-foreground) !important;
+  border-color: var(--color-border) !important;
+}
+.leaflet-tooltip {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  color: var(--color-foreground);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.leaflet-tooltip::before {
+  border-top-color: var(--color-border);
+}
+
+.pod-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  color: var(--color-primary-foreground);
+  background: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-primary) 30%, transparent);
+}
+.pod-icon--live {
+  animation: pod-pulse 1.4s ease-out infinite;
+}
+@keyframes pod-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-primary) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 18px color-mix(in oklab, var(--color-primary) 0%, transparent);
+  }
+}
+
+.rescuer-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: #06222b;
+  background: #37e0ff;
+  box-shadow: 0 0 0 3px color-mix(in oklab, #37e0ff 28%, transparent);
+}
